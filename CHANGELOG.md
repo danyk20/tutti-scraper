@@ -5,6 +5,43 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-07-05
+
+### Added
+
+- Search filters for `scrape()`/the CLI, on top of the free-text `query`:
+  - Server-side (sent to tutti.ch as part of the search itself, reusing the
+    existing category/price constraint machinery): `category` (pin to a
+    categoryID, skipping auto category-split), `price_from`/`price_to`
+    (CHF), `free_only`.
+  - Client-side (applied locally against already-fetched summary fields,
+    since tutti.ch's API has no server-side equivalent): `canton`,
+    `postcode` (prefix match), `max_age_days`, `highlighted_only`.
+    `max_results` now counts matching listings, not raw ones fetched
+    before filtering.
+  - New CLI flags: `--category`, `--price-from`, `--price-to`,
+    `--free-only`, `--canton`, `--postcode`, `--max-age-days`,
+    `--highlighted-only`.
+  - `ScrapeResult.suggested_categories` — tutti.ch's own suggested
+    sub-categories for a query, for discovering valid `category` values
+    without a separate lookup.
+  - Validation, raised as `ValueError` before any network call:
+    `price_from > price_to`, `free_only` combined with `price_from`/
+    `price_to`, non-positive `max_age_days`, non-numeric `postcode`.
+- `Scraper` gained `seed_category`/`seed_constraints`/`price_bounds`/
+  `allow_free_pass` so a caller-supplied filter can seed the recursive
+  category-split/price-bisection algorithm from the start, instead of
+  always discovering categories/prices from an unfiltered query.
+
+### Fixed
+
+- `Scraper._bisect_price()` previously discarded its `base_constraints`
+  parameter on every recursive call, silently dropping any constraint key
+  besides the price window it was actively bisecting. Harmless before this
+  release (nothing else was ever seeded), but would have silently broken
+  filter combinations once one existed. Fixed via a new
+  `Scraper._merge_constraints()` helper.
+
 ## [0.1.0] - 2026-07-05
 
 Initial release.

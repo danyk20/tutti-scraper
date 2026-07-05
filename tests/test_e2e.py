@@ -56,6 +56,27 @@ def test_scrape_real_pipeline_with_and_without_detail():
     assert "coordinates" in full.listings[0]
 
 
+def test_scrape_real_pipeline_respects_category_price_and_canton_filters():
+    result = scraper.scrape(
+        "velo",
+        category="bicycles",
+        price_from=20,
+        price_to=200,
+        canton="BE",
+        max_results=5,
+        delay=0.5,
+        verbose=False,
+    )
+
+    assert result.total_elements > 0
+    assert result.suggested_categories == []  # category was pinned - nothing to suggest
+    for row in result.rows:
+        assert row["categoryKey"] == "bicycles"
+        assert row["cantonKey"] == "BE"
+        if row["price"] is not None:  # numericPrice can be absent on some listings
+            assert 20 <= row["price"] < 200
+
+
 def test_cli_end_to_end_writes_csv_and_json(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 

@@ -45,6 +45,61 @@ def test_main_translates_required_flags(fake_scrape, tmp_path, monkeypatch):
     assert fake_scrape["kwargs"]["sort"] == "timestamp"
     assert fake_scrape["kwargs"]["max_results"] is None
     assert fake_scrape["kwargs"]["delay"] == 1.0
+    # every new filter defaults to "off"
+    assert fake_scrape["kwargs"]["category"] is None
+    assert fake_scrape["kwargs"]["price_from"] is None
+    assert fake_scrape["kwargs"]["price_to"] is None
+    assert fake_scrape["kwargs"]["free_only"] is False
+    assert fake_scrape["kwargs"]["canton"] is None
+    assert fake_scrape["kwargs"]["postcode"] is None
+    assert fake_scrape["kwargs"]["max_age_days"] is None
+    assert fake_scrape["kwargs"]["highlighted_only"] is False
+
+
+def test_main_translates_all_new_filter_flags(fake_scrape, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    scraper.main(
+        [
+            "velo",
+            "--category", "bicycles",
+            "--price-from", "10",
+            "--price-to", "100",
+            "--canton", "BE",
+            "--postcode", "3000",
+            "--max-age-days", "7",
+            "--highlighted-only",
+        ]
+    )  # fmt: skip
+
+    kwargs = fake_scrape["kwargs"]
+    assert kwargs["category"] == "bicycles"
+    assert kwargs["price_from"] == 10
+    assert kwargs["price_to"] == 100
+    assert kwargs["canton"] == "BE"
+    assert kwargs["postcode"] == "3000"
+    assert kwargs["max_age_days"] == 7
+    assert kwargs["highlighted_only"] is True
+
+
+def test_main_translates_free_only_flag(fake_scrape, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    scraper.main(["velo", "--free-only"])
+
+    assert fake_scrape["kwargs"]["free_only"] is True
+
+
+def test_main_propagates_scrape_validation_errors(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    def _raise(*a, **k):
+        raise ValueError("free_only cannot be combined with price_from/price_to")
+
+    monkeypatch.setattr(scraper, "scrape", _raise)
+
+    with pytest.raises(ValueError, match="free_only cannot be combined"):
+        scraper.main(["velo", "--free-only", "--price-from", "10"])
 
 
 def test_main_no_detail_flag_sets_detail_false(fake_scrape, tmp_path, monkeypatch):

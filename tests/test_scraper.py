@@ -206,3 +206,93 @@ def test_sort_mode_is_forwarded_to_client(small_limits):
     paging_calls = [c for c in client.calls if c["first"] != 1]
     assert paging_calls
     assert all(c["sort"] == "PRICE" for c in paging_calls)
+
+
+def test_run_skips_category_split_when_seed_category_given(small_limits):
+    items = make_items(10, category="bikes") + make_items(2, category="cars")
+    client = FakeClient(items)
+
+    result = list(scraper.Scraper(client, "q", seed_category="bikes").run())
+
+    assert len(result) == 10
+    assert all(n["category"] == "bikes" for n in result)
+    # every call must carry category="bikes" - never None (which would
+    # trigger tutti's suggestedCategories-driven category split)
+    assert all(c["category"] == "bikes" for c in client.calls)
+
+
+def test_suggested_categories_captured_for_unfiltered_top_level_probe(small_limits):
+    items = make_items(4, category="bikes") + make_items(4, category="cars")
+    client = FakeClient(items)
+    scraper_ = scraper.Scraper(client, "q")
+
+    list(scraper_.run())
+
+    assert {c["categoryID"] for c in scraper_.suggested_categories} == {"bikes", "cars"}
+
+
+def test_suggested_categories_empty_when_category_is_seeded(small_limits):
+    items = make_items(4, category="bikes")
+    client = FakeClient(items)
+    scraper_ = scraper.Scraper(client, "q", seed_category="bikes")
+
+    list(scraper_.run())
+
+    assert scraper_.suggested_categories == []
+
+
+def test_allow_free_pass_false_suppresses_the_free_only_mop_up_pass(small_limits):
+    items = make_items(10, category="bikes")  # includes a price=0 item
+    client = FakeClient(items)
+
+    list(scraper.Scraper(client, "q", seed_category="bikes", allow_free_pass=False).run())
+
+    free_only_calls = [
+        c for c in client.calls if c["constraints"] and c["constraints"].get("prices", [{}])[0].get("freeOnly")
+    ]
+    assert free_only_calls == []
+
+
+def test_bisect_price_merges_base_constraints_instead_of_discarding_them(small_limits):
+    # Regression test for a latent bug: _bisect_price used to always rebuild
+    # constraints from scratch (price_constraint(pmin, pmax)), silently
+    # dropping anything else in base_constraints. Only "prices" exists as a
+    # constraint family in practice today, so a sentinel key simulates a
+    # hypothetical second one to prove the merge preserves it.
+    items = make_items(20, category="bikes")
+    client = FakeClient(items)
+    seed = {"prices": [{"key": "price"}], "sentinel": "keep-me"}
+
+    scraper_ = scraper.Scraper(client, "q", seed_category="bikes", seed_constraints=seed)
+    list(scraper_.run())
+
+    constrained_calls = [c for c in client.calls if c["constraints"]]
+    assert constrained_calls  # bisection actually happened
+    assert all(c["constraints"].get("sentinel") == "keep-me" for c in constrained_calls)
+
+
+def test_merge_constraints_helper():
+    merge = scraper.Scraper._merge_constraints
+    assert merge(None, {"a": 1}) == {"a": 1}
+    assert merge({}, {"a": 1}) == {"a": 1}
+    assert merge({"a": 1}, None) == {"a": 1}
+    assert merge({"a": 1}, {}) == {"a": 1}
+    assert merge({"a": 1}, {"b": 2}) == {"a": 1, "b": 2}
+    assert merge({"a": 1}, {"a": 2}) == {"a": 2}  # overlay wins on key conflict
+
+
+def test_price_bounds_scope_bisection_to_the_seeded_window(small_limits):
+    items = make_items(20, category="bikes")  # prices 0, 10, ..., 190
+    client = FakeClient(items)
+    seed = scraper.price_constraint(50, 150)
+
+    scraper_ = scraper.Scraper(client, "q", seed_category="bikes", seed_constraints=seed, price_bounds=(50, 150))
+    list(scraper_.run())
+
+    price_calls = [
+        c["constraints"]["prices"][0] for c in client.calls if c["constraints"] and c["constraints"].get("prices")
+    ]
+    assert price_calls
+    for price_filter in price_calls:
+        assert price_filter.get("min", 50) >= 50
+        assert price_filter.get("max") is None or price_filter["max"] <= 150

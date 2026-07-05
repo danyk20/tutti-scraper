@@ -78,6 +78,33 @@ are flattened into columns, and lists are joined into a single
 semicolon-separated cell — so no data from the API response is dropped on
 the way into the CSV.
 
+## Filters
+
+`scrape()` and the CLI support two kinds of filter, depending on whether
+tutti.ch's API can apply them itself:
+
+- **Server-side** (`category`, `price_from`/`price_to`, `free_only`) — sent
+  to tutti.ch as part of the search itself, reusing the same `category`/
+  `constraints` machinery the pagination workaround above needs anyway.
+  Pinning `category` also skips the auto category-split step, since
+  there's nothing left to discover. Use `ScrapeResult.suggested_categories`
+  from an unfiltered search to find valid `category` values for your
+  query.
+- **Client-side** (`canton`, `postcode`, `max_age_days`, `highlighted_only`)
+  — applied locally against already-fetched summary fields, since tutti.ch
+  has no server-side constraint for them. `max_results` still counts
+  *matching* listings, not raw ones fetched before filtering.
+
+`free_only=True` cannot be combined with `price_from`/`price_to` (raises
+`ValueError` before any network call) — a price range has no meaning for
+free listings.
+
+**Not implemented** (bigger lifts, out of scope for now): true radius/
+location search (would need reverse-engineering tutti.ch's place-name-to-
+locality-ID resolution) and per-category structured attribute filters like
+color/size/brand (each category has its own dynamic filter schema that
+would need to be queried and mapped).
+
 ## Locales
 
 Every function and the CLI accept a `lang` (default `"de"`) — `"fr"` and
@@ -136,10 +163,22 @@ files in the current directory: `velo.csv` and `velo.json`.
 | `--out` | Output file base name, without extension. Defaults to a slug of the search phrase |
 | `--no-detail` | Skip visiting each listing individually; keep only the summary fields from the search results (faster, fewer fields) |
 | `--sort` | Sort order tutti.ch searches with — `timestamp` (default), `price`, or `relevance` |
-| `--max` | Stop after N listings |
+| `--max` | Stop after N *matching* listings (after every filter below) |
 | `--delay` | Seconds to wait between requests (default `1.0`) — raise this if you get rate-limited |
+| `--category` | Pin the search to a tutti.ch categoryID (e.g. `bicycles`), skipping auto category-split |
+| `--price-from` / `--price-to` | Filter by price in CHF (inclusive, either end optional) |
+| `--free-only` | Only free listings — cannot be combined with `--price-from`/`--price-to` |
+| `--canton` | Only listings in this canton (2-letter code, e.g. `BE`), case-insensitive |
+| `--postcode` | Only listings whose postcode starts with this value |
+| `--max-age-days` | Only listings posted within the last N days |
+| `--highlighted-only` | Only sponsored/boosted listings |
 | `-v` / `--verbose` | Also show debug-level detail, including every HTTP request made (mutually exclusive with `-q`) |
 | `-q` / `--quiet` | Suppress progress output; only warnings/errors are shown (mutually exclusive with `-v`) |
+
+The price/category/free-only filters are applied by tutti.ch's own search
+API (server side); canton/postcode/max-age/highlighted-only are applied by
+this scraper against already-fetched fields (client side) — see
+[Filters](#filters) above for why that distinction exists.
 
 ### Examples
 
@@ -161,6 +200,15 @@ pipenv run python tutti_scraper.py "velo" --lang fr
 
 # Any free-text phrase works, including multi-word ones
 pipenv run python tutti_scraper.py "Tesla Roadster"
+
+# Price range, pinned to one category
+pipenv run python tutti_scraper.py "velo" --category bicycles --price-from 50 --price-to 300
+
+# Only free listings
+pipenv run python tutti_scraper.py "velo" --free-only
+
+# Canton + freshness filters
+pipenv run python tutti_scraper.py "velo" --canton BE --max-age-days 7
 ```
 
 ### As a library, from another project
@@ -173,11 +221,12 @@ you explicitly ask for them.
 ```python
 from tutti_scraper import scrape
 
-result = scrape("velo", max_results=50)
+result = scrape("velo", price_from=50, price_to=300, canton="BE", max_results=50)
 
-result.rows       # list[dict]: one flattened dict per listing, CSV-ready
-result.listings   # list[dict]: raw (unflattened) API JSON per listing, each with a "url" field
+result.rows                  # list[dict]: one flattened dict per listing, CSV-ready
+result.listings               # list[dict]: raw (unflattened) API JSON per listing, each with a "url" field
 result.query, result.total_elements, result.lang
+result.suggested_categories  # tutti.ch's own suggested sub-categories for this query
 
 for row in result.rows:
     print(row["price"], row["title"], row["url"])
@@ -201,15 +250,26 @@ def scrape(
     lang: str = "de",                # "de" (default), "fr", or "it"
     detail: bool = True,             # visit every listing individually for full fields (slower)
     sort: str = "timestamp",         # "timestamp" (default), "price", or "relevance"
-    max_results: int | None = None,  # stop after this many unique listings, if given
+    max_results: int | None = None,  # stop after this many unique *matching* listings, if given
     delay: float = 1.0,              # seconds between HTTP requests
     verbose: bool = True,            # emit progress via the "tutti_scraper" logger at INFO level
     client: TuttiClient | None = None,  # reuse a client across calls if given
+    category: str | None = None,     # pin to this categoryID, server-side (skips auto category-split)
+    price_from: int | None = None,   # CHF, inclusive, server-side
+    price_to: int | None = None,     # CHF, inclusive, server-side
+    free_only: bool = False,         # only free listings, server-side (see Filters)
+    canton: str | None = None,       # 2-letter canton code, client-side
+    postcode: str | None = None,     # postcode prefix match, client-side
+    max_age_days: int | None = None, # only listings posted within the last N days, client-side
+    highlighted_only: bool = False,  # only sponsored/boosted listings, client-side
 ) -> ScrapeResult:
     ...
 ```
 
-Raises `TuttiError` on unrecoverable GraphQL/HTTP errors from tutti.ch after
+Raises `ValueError` immediately (before any network call) if `price_from >
+price_to`, if `free_only` is combined with `price_from`/`price_to`, if
+`max_age_days` isn't positive, or if `postcode` isn't numeric. Raises
+`TuttiError` on unrecoverable GraphQL/HTTP errors from tutti.ch after
 retries are exhausted, and `requests.RequestException` subclasses on
 unrecoverable network errors.
 
@@ -240,6 +300,8 @@ class ScrapeResult:
     listings: list[dict]    # raw API objects — see "Data structure" below
     rows: list[dict]        # flattened dicts, one per listing, CSV-ready, sorted by price ascending
     lang: str                # locale that was scraped, e.g. "de"
+    suggested_categories: list[dict[str, str]]  # tutti.ch's suggested sub-categories for `query`;
+                                                 # empty if `category` was given (nothing left to suggest)
 
     def to_csv(self, path: str) -> None: ...   # writes self.rows
     def to_json(self, path: str) -> None: ...  # writes self.listings
@@ -274,6 +336,7 @@ transfers to the other with minimal changes:
 | Return value | `ScrapeResult` (`.rows`, `.listings`, `.to_csv()`, `.to_json()`) | same |
 | Common row keys | `row["price"]`, `row["url"]` | same |
 | Detail toggle | `detail=True` / `--no-detail` | same |
+| Price filter | `price_from`/`price_to` (CHF) | same names, same meaning |
 | Reusable transport | `session: requests.Session | None` | `client: TuttiClient | None` (see below) |
 | Locale/region | `domain: str = "ch"` | `lang: str = "de"` |
 | Logging | `logging.getLogger("autoscout24_scraper")`, `-v`/`-q` CLI flags | `logging.getLogger("tutti_scraper")`, same flags |
@@ -289,11 +352,12 @@ domains actually differ:
   should work against either scraper, treat this parameter as opaque
   (pass `None` to let each library build its own) rather than constructing
   it yourself.
-- **Search shape.** AutoScout24 lets you filter by price/mileage/year server
-  side, because it's a structured make/model catalog. tutti.ch is a general
-  classifieds site searched by free text, so those specific filters don't
-  have a tutti equivalent — `scrape()`'s `sort`/`max_results` options exist
-  instead, for the free-text case.
+- **Search shape.** AutoScout24 also lets you filter by mileage/year server
+  side, because it's a structured make/model catalog — those don't have a
+  tutti equivalent (there's no "mileage" on a general classifieds site).
+  tutti.ch adds its own extras instead: `category`/`canton`/`postcode`/
+  `max_age_days`/`highlighted_only`/`free_only`, plus `sort`/`max_results`
+  for the free-text case (see [Filters](#filters) above).
 
 If you're adapting this project to a *third* data source, following this
 same shape (`scrape()` → `ScrapeResult`, `flatten_listing()`/`save_csv()`/
@@ -426,7 +490,7 @@ What's covered:
 |---|---|---|
 | `TuttiClient._post` | retry-then-succeed and exhausted-retries paths for GraphQL errors, 429/5xx, connection errors; no retry on 4xx; fresh hash per attempt | — |
 | `Scraper` (partitioning) | direct paging, category split (once, not recursively), price bisection, free-only pass, ascending sweep, dedup, depth/range safety valve + warning | — |
-| `search_listings` / `visit_all_listings` | max-results early stop, progress logging, detail-fetch-failure fallback | real search + detail fetch |
+| `search_listings` / `visit_all_listings` | max-results early stop (post-filter), progress logging, detail-fetch-failure fallback, canton/postcode/max-age/highlighted-only predicate, suggested-categories surfacing | real search + detail fetch |
 | `flatten_listing` / `_scalarize` / `order_fieldnames` | every branch (nested dicts, lists, missing/unrecognized types) | implicitly, via real data |
 | `save_csv` / `save_json` / `ScrapeResult` | heterogeneous rows, unicode, empty input | round-trip against real files |
 | `scrape()` | orchestration, sorting, client reuse/construction, verbose logging | full real pipeline, with and without `detail` |

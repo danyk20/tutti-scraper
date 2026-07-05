@@ -72,11 +72,12 @@ import time
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import requests
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 API_URL = "https://www.tutti.ch/api/v10/graphql"
 
@@ -289,25 +290,74 @@ class Scraper:
     tutti's equivalent of a simple paginated search - more involved than
     that would otherwise be, only because of the ~3000-offset pagination
     cap (see module docstring). search_listings(), below, is the plain
-    function wrapper most callers should use instead of this class directly."""
+    function wrapper most callers should use instead of this class directly.
 
-    def __init__(self, client, query, sort="TIMESTAMP"):
+    seed_category/seed_constraints let a caller pin the search to a
+    server-side filter (a specific category, and/or a price window) from
+    the start, instead of always discovering categories/prices from an
+    unfiltered query. price_bounds narrows the range _bisect_price()
+    searches within (e.g. to a caller-supplied [price_from, price_to]
+    instead of [0, MAX_PRICE]). allow_free_pass suppresses the free-only
+    mop-up pass when it would contradict an explicit price floor > 0."""
+
+    def __init__(
+        self,
+        client,
+        query,
+        sort="TIMESTAMP",
+        seed_category=None,
+        seed_constraints=None,
+        price_bounds=(0, MAX_PRICE),
+        allow_free_pass=True,
+    ):
         self.client = client
         self.query = query
         self.sort = sort
+        self.seed_category = seed_category
+        self.seed_constraints = seed_constraints
+        self.price_bounds = price_bounds
+        self.allow_free_pass = allow_free_pass
         self.seen = set()
+        self.suggested_categories = []
 
     def run(self):
-        yield from self._scrape(category=None, constraints=None, allow_category_split=True)
+        # A caller-pinned category has nothing to split into - only the
+        # unfiltered top-level query ever gets category-split.
+        allow_split = self.seed_category is None
+        yield from self._scrape(
+            category=self.seed_category, constraints=self.seed_constraints, allow_category_split=allow_split
+        )
         # Sweep from the opposite end too: for query/category combos that
         # stayed too large even after splitting, DESCENDING and ASCENDING
         # sample different items from the same offset-limited window.
-        yield from self._linear_page(category=None, constraints=None, direction="ASCENDING")
+        yield from self._linear_page(
+            category=self.seed_category, constraints=self.seed_constraints, direction="ASCENDING"
+        )
+
+    @staticmethod
+    def _merge_constraints(base, overlay):
+        # Shallow overlay is sufficient today: exactly one constraint
+        # family ("prices") is ever populated at a time. A future feature
+        # needing two simultaneous constraint families (e.g. "prices" and
+        # "locations" together) would need a smarter, key-aware merge.
+        if not base:
+            return overlay
+        if not overlay:
+            return base
+        merged = dict(base)
+        merged.update(overlay)
+        return merged
 
     def _probe_total(self, category, constraints):
         result = self.client.search(self.query, category=category, constraints=constraints, offset=0, first=1)
         listings = result["listings"]
-        return listings["totalCount"], result.get("suggestedCategories") or []
+        suggested = result.get("suggestedCategories") or []
+        # tutti.ch's suggestedCategories reflects `category` only, not
+        # `constraints` (confirmed live) - so this is still meaningful even
+        # when a price constraint is seeded, as long as no category is set.
+        if category is None:
+            self.suggested_categories = suggested
+        return listings["totalCount"], suggested
 
     def _linear_page(self, category, constraints, direction="DESCENDING"):
         offset = 0
@@ -346,15 +396,17 @@ class Scraper:
             for cat in suggested:
                 yield from self._scrape(cat["categoryID"], constraints, allow_category_split=False)
             return
-        yield from self._bisect_price(category, constraints, 0, MAX_PRICE, depth=0)
-        # Price-bucketed constraints can exclude listings with no numeric
-        # price (e.g. "price on request"); a dedicated free-only pass
-        # recovers at least the free ones.
-        free_constraints = price_constraint(free_only=True)
-        yield from self._linear_page(category, free_constraints)
+        pmin, pmax = self.price_bounds
+        yield from self._bisect_price(category, constraints, pmin, pmax, depth=0)
+        if self.allow_free_pass:
+            # Price-bucketed constraints can exclude listings with no
+            # numeric price (e.g. "price on request"); a dedicated
+            # free-only pass recovers at least the free ones.
+            free_constraints = self._merge_constraints(constraints, price_constraint(free_only=True))
+            yield from self._linear_page(category, free_constraints)
 
     def _bisect_price(self, category, base_constraints, pmin, pmax, depth):
-        constraints = price_constraint(pmin, pmax)
+        constraints = self._merge_constraints(base_constraints, price_constraint(pmin, pmax))
         total, _ = self._probe_total(category, constraints)
         if total == 0:
             return
@@ -376,20 +428,96 @@ class Scraper:
         yield from self._bisect_price(category, base_constraints, mid, pmax, depth + 1)
 
 
-def search_listings(client, query, *, sort="TIMESTAMP", max_results=None, verbose=True):
+def _build_predicate(canton=None, postcode=None, max_age_days=None, highlighted_only=False):
+    """Build a filter over fields already present on a search-summary node
+    (canton, postcode, listing age, highlighted-only) - applied client-side
+    since tutti.ch's GraphQL API has no server-side constraint for them."""
+    canton_upper = canton.upper() if canton else None
+    cutoff = datetime.now(UTC) - timedelta(days=max_age_days) if max_age_days is not None else None
+
+    def predicate(node):
+        if canton_upper is not None:
+            node_canton = ((node.get("postcodeInformation") or {}).get("canton") or {}).get("shortName")
+            if not node_canton or node_canton.upper() != canton_upper:
+                return False
+        if postcode is not None:
+            node_postcode = (node.get("postcodeInformation") or {}).get("postcode") or ""
+            if not node_postcode.startswith(postcode):
+                return False
+        if cutoff is not None:
+            timestamp = node.get("timestamp")
+            if not timestamp or datetime.fromisoformat(timestamp) < cutoff:
+                return False
+        if highlighted_only and not node.get("highlighted"):
+            return False
+        return True
+
+    return predicate
+
+
+def search_listings(
+    client,
+    query,
+    *,
+    sort="TIMESTAMP",
+    max_results=None,
+    verbose=True,
+    category=None,
+    price_from=None,
+    price_to=None,
+    free_only=False,
+    canton=None,
+    postcode=None,
+    max_age_days=None,
+    highlighted_only=False,
+):
     """Search tutti.ch for `query` and return every reachable listing
-    summary as a list of raw node dicts (see SEARCH_QUERY for the shape).
-    Stops early once `max_results` unique listings have been collected, if
-    given."""
-    scraper = Scraper(client, query, sort=sort)
+    summary matching the given filters, as a list of raw node dicts (see
+    SEARCH_QUERY for the shape), plus tutti.ch's suggested sub-categories
+    for the query (empty if `category` was given - see Scraper). Stops
+    early once `max_results` unique *matching* listings have been
+    collected, if given.
+
+    `category`/`price_from`/`price_to`/`free_only` are sent to tutti.ch as
+    server-side constraints. `canton`/`postcode`/`max_age_days`/
+    `highlighted_only` are applied client-side against already-fetched
+    summary fields, since tutti.ch's API has no server-side constraint for
+    them.
+    """
+    seed_constraints = None
+    price_bounds = (0, MAX_PRICE)
+    allow_free_pass = True
+    if free_only:
+        seed_constraints = price_constraint(free_only=True)
+        allow_free_pass = False  # a second free-only pass would be a pure no-op
+    elif price_from is not None or price_to is not None:
+        seed_constraints = price_constraint(price_from, price_to)
+        price_bounds = (price_from or 0, price_to if price_to is not None else MAX_PRICE)
+        # A free-only mop-up pass must never surface a free listing when
+        # the caller set an explicit price floor above 0.
+        allow_free_pass = price_from is None or price_from <= 0
+
+    scraper = Scraper(
+        client,
+        query,
+        sort=sort,
+        seed_category=category,
+        seed_constraints=seed_constraints,
+        price_bounds=price_bounds,
+        allow_free_pass=allow_free_pass,
+    )
+    predicate = _build_predicate(canton, postcode, max_age_days, highlighted_only)
+
     nodes = []
     for node in scraper.run():
+        if not predicate(node):
+            continue
         nodes.append(node)
         if verbose and len(nodes) % PAGE_SIZE == 0:
             logger.info("... %d listings found so far", len(nodes))
         if max_results is not None and len(nodes) >= max_results:
             break
-    return nodes
+    return nodes, scraper.suggested_categories
 
 
 def visit_all_listings(client, listings, *, verbose=True):
@@ -519,6 +647,10 @@ class ScrapeResult:
     listings: list[dict[str, Any]] = field(default_factory=list)  # raw API objects (summary or full detail shape)
     rows: list[dict[str, Any]] = field(default_factory=list)  # flattened dicts, one per listing, CSV-ready
     lang: str = "de"  # locale that was scraped, e.g. "de"
+    # tutti.ch's own suggested sub-categories for `query` - lets a caller
+    # discover valid `category` filter values without a separate lookup.
+    # Empty when `category` was given (nothing left to suggest).
+    suggested_categories: list[dict[str, str]] = field(default_factory=list)
 
     def to_csv(self, path: str) -> None:
         save_csv(self.rows, path)
@@ -537,6 +669,14 @@ def scrape(
     delay: float = 1.0,
     verbose: bool = True,
     client: "TuttiClient | None" = None,
+    category: str | None = None,
+    price_from: int | None = None,
+    price_to: int | None = None,
+    free_only: bool = False,
+    canton: str | None = None,
+    postcode: str | None = None,
+    max_age_days: int | None = None,
+    highlighted_only: bool = False,
 ) -> ScrapeResult:
     """Search tutti.ch for `query` and return the results in memory.
 
@@ -554,7 +694,8 @@ def scrape(
             (much faster).
         sort: Sort order tutti.ch searches with - "timestamp" (default),
             "price", or "relevance".
-        max_results: Stop after this many unique listings, if given.
+        max_results: Stop after this many unique *matching* listings
+            (i.e. after every filter below), if given.
         delay: Seconds to wait between requests.
         verbose: If True, emit progress via the "tutti_scraper" logger at
             INFO level.
@@ -562,17 +703,65 @@ def scrape(
             A new one is created (using `lang` and `delay`) if not given -
             if you do pass one, make sure its `lang` matches this `lang`
             argument, since they aren't cross-checked.
+        category: Pin the search to this tutti.ch categoryID (e.g.
+            "bicycles"), skipping auto category-split. Use
+            `ScrapeResult.suggested_categories` from an unfiltered search
+            to discover valid values for a given query.
+        price_from: Minimum price in CHF (inclusive). Sent to tutti.ch as a
+            server-side filter.
+        price_to: Maximum price in CHF (inclusive). Sent to tutti.ch as a
+            server-side filter.
+        free_only: Only free listings. Sent to tutti.ch as a server-side
+            filter. Cannot be combined with price_from/price_to (raises
+            ValueError) - a price range has no meaning for free listings.
+        canton: Only listings in this canton (2-letter code, e.g. "BE"),
+            case-insensitive. Applied client-side (no server-side
+            equivalent), against already-fetched summary fields.
+        postcode: Only listings whose postcode starts with this value.
+            Applied client-side.
+        max_age_days: Only listings posted within the last N days. Applied
+            client-side.
+        highlighted_only: Only sponsored/boosted listings. Applied
+            client-side.
 
     Returns:
         A ScrapeResult with `.listings` (raw API objects, each including a
-        "url" pointing at the original ad) and `.rows` (flattened dicts, one
-        per listing, sorted by price).
+        "url" pointing at the original ad), `.rows` (flattened dicts, one
+        per listing, sorted by price), and `.suggested_categories`.
+
+    Raises:
+        ValueError: if price_from > price_to, if free_only is combined with
+            price_from/price_to, if max_age_days isn't positive, or if
+            postcode isn't numeric. Raised before any network call.
     """
+    if price_from is not None and price_to is not None and price_from > price_to:
+        raise ValueError(f"price_from ({price_from}) must be <= price_to ({price_to})")
+    if free_only and (price_from is not None or price_to is not None):
+        raise ValueError("free_only cannot be combined with price_from/price_to")
+    if max_age_days is not None and max_age_days <= 0:
+        raise ValueError(f"max_age_days must be positive, got {max_age_days}")
+    if postcode is not None and not postcode.isdigit():
+        raise ValueError(f"postcode must be numeric, got {postcode!r}")
+
     client = client or TuttiClient(lang=lang, delay=delay)
 
     if verbose:
         logger.info("Searching tutti.ch for %r ...", query)
-    nodes = search_listings(client, query, sort=sort.upper(), max_results=max_results, verbose=verbose)
+    nodes, suggested_categories = search_listings(
+        client,
+        query,
+        sort=sort.upper(),
+        max_results=max_results,
+        verbose=verbose,
+        category=category,
+        price_from=price_from,
+        price_to=price_to,
+        free_only=free_only,
+        canton=canton,
+        postcode=postcode,
+        max_age_days=max_age_days,
+        highlighted_only=highlighted_only,
+    )
     total_elements = len(nodes)
     for node in nodes:
         node["url"] = listing_url(node, lang)
@@ -593,6 +782,7 @@ def scrape(
         listings=listings,
         rows=rows,
         lang=lang,
+        suggested_categories=suggested_categories,
     )
 
 
@@ -625,6 +815,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--max", type=int, default=None, help="Stop after N listings.")
     parser.add_argument("--delay", type=float, default=1.0, help="Delay in seconds between requests.")
+    parser.add_argument("--price-from", type=int, default=None, help="Minimum price in CHF (inclusive).")
+    parser.add_argument("--price-to", type=int, default=None, help="Maximum price in CHF (inclusive).")
+    parser.add_argument(
+        "--free-only",
+        action="store_true",
+        help="Only free listings. Cannot be combined with --price-from/--price-to.",
+    )
+    parser.add_argument(
+        "--category",
+        default=None,
+        help="Pin the search to a tutti.ch categoryID (e.g. 'bicycles'), skipping auto category-split.",
+    )
+    parser.add_argument("--canton", default=None, help="Only listings in this canton (2-letter code, e.g. 'BE').")
+    parser.add_argument("--postcode", default=None, help="Only listings whose postcode starts with this value.")
+    parser.add_argument("--max-age-days", type=int, default=None, help="Only listings posted within the last N days.")
+    parser.add_argument("--highlighted-only", action="store_true", help="Only sponsored/boosted listings.")
     verbosity = parser.add_mutually_exclusive_group()
     verbosity.add_argument(
         "-v", "--verbose", action="store_true", help="Show debug-level detail, including every HTTP request made."
@@ -677,6 +883,14 @@ def main(argv: list[str] | None = None) -> int:
         max_results=args.max,
         delay=args.delay,
         verbose=True,
+        category=args.category,
+        price_from=args.price_from,
+        price_to=args.price_to,
+        free_only=args.free_only,
+        canton=args.canton,
+        postcode=args.postcode,
+        max_age_days=args.max_age_days,
+        highlighted_only=args.highlighted_only,
     )
 
     out_base = args.out or _slugify(args.query)
