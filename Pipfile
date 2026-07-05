@@ -1,0 +1,20 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+requests = "~=2.34"
+
+[dev-packages]
+pytest = "~=9.1"
+pytest-cov = "~=7.1"
+responses = "~=0.26"
+ruff = "~=0.15"
+mypy = "~=2.1"
+types-requests = "~=2.33"
+build = "~=1.5"
+twine = "~=6.2"
+
+[requires]
+python_version = "3.12"

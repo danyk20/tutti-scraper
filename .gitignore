@@ -1,0 +1,16 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+*.csv
+*.json
+!Pipfile.lock
+*.jsonl
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/

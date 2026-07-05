@@ -1,0 +1,28 @@
+name: E2E (live API)
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC. Keeps this off the main CI path (real
+    # network calls against tutti.ch shouldn't run on every push) while
+    # still giving an early warning if tutti.ch changes their API shape.
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "requests~=2.34" "pytest~=9.1" "pytest-cov~=7.1" "responses~=0.26"
+
+      - name: End-to-end tests against the live API
+        run: pytest -m e2e --no-cov
