@@ -132,7 +132,16 @@ pipenv run mypy tutti_scraper.py # type-check
 ```
 
 These are exactly the checks the CI workflow (`.github/workflows/ci.yml`)
-runs on every push/PR, across Python 3.11 and 3.12.
+runs on every push/PR, across Python 3.11 and 3.12 — plus a weekly/on-push
+[CodeQL](https://github.com/danyk20/tutti-scraper/security/code-scanning)
+scan and [Dependabot](https://github.com/danyk20/tutti-scraper/network/updates)
+watching for dependency updates. Run `pipenv run pre-commit install` once to
+also get ruff/mypy checked automatically on every commit, before CI even
+sees it.
+
+The package ships a [`py.typed`](https://peps.python.org/pep-0561/) marker,
+so `mypy`/`pyright` in a project that imports it will type-check against its
+real signatures instead of treating it as untyped.
 
 ## Usage
 
@@ -163,8 +172,11 @@ files in the current directory: `velo.csv` and `velo.json`.
 | `--out` | Output file base name, without extension. Defaults to a slug of the search phrase |
 | `--no-detail` | Skip visiting each listing individually; keep only the summary fields from the search results (faster, fewer fields) |
 | `--sort` | Sort order tutti.ch searches with — `timestamp` (default), `price`, or `relevance` |
-| `--max` | Stop after N *matching* listings (after every filter below) |
+| `--max` | Stop after N *matching* listings (after every filter below); also sets the preview size for `--dry-run` |
 | `--delay` | Seconds to wait between requests (default `1.0`) — raise this if you get rate-limited |
+| `--timeout` | Seconds to wait for a single HTTP response before retrying (default `30.0`) |
+| `--max-retries` | Maximum attempts per request before giving up (default `5`) |
+| `--dry-run` | Preview up to `--max` (default `5`) matching listings — no detail fetch, no files written |
 | `--category` | Pin the search to a tutti.ch categoryID (e.g. `bicycles`), skipping auto category-split |
 | `--price-from` / `--price-to` | Filter by price in CHF (inclusive, either end optional) |
 | `--free-only` | Only free listings — cannot be combined with `--price-from`/`--price-to` |
@@ -200,6 +212,12 @@ pipenv run python tutti_scraper.py "velo" --lang fr
 
 # Any free-text phrase works, including multi-word ones
 pipenv run python tutti_scraper.py "Tesla Roadster"
+
+# Peek at up to 5 matches before committing to a full run - no files written
+pipenv run python tutti_scraper.py "velo" --dry-run
+
+# Same, but preview 20 and give the API more time per request
+pipenv run python tutti_scraper.py "velo" --dry-run --max 20 --timeout 60
 
 # Price range, pinned to one category
 pipenv run python tutti_scraper.py "velo" --category bicycles --price-from 50 --price-to 300
@@ -254,6 +272,8 @@ def scrape(
     delay: float = 1.0,              # seconds between HTTP requests
     verbose: bool = True,            # emit progress via the "tutti_scraper" logger at INFO level
     client: TuttiClient | None = None,  # reuse a client across calls if given
+    timeout: float = 30.0,           # seconds per HTTP response before retrying
+    max_retries: int = 5,            # max attempts per request before giving up
     category: str | None = None,     # pin to this categoryID, server-side (skips auto category-split)
     price_from: int | None = None,   # CHF, inclusive, server-side
     price_to: int | None = None,     # CHF, inclusive, server-side

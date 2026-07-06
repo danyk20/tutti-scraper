@@ -117,6 +117,35 @@ def test_lang_option_sets_accept_language(lang, expected):
     assert client.session.headers["Accept-Language"] == expected
 
 
+def test_default_timeout_is_30_seconds():
+    client = scraper.TuttiClient()
+    assert client.timeout == 30.0
+
+
+@responses.activate
+def test_custom_timeout_is_passed_to_the_http_call(monkeypatch):
+    monkeypatch.setattr(scraper.time, "sleep", lambda *_a, **_k: None)
+    captured = {}
+    original_post = scraper.requests.Session.post
+
+    def spy_post(self, *args, **kwargs):
+        captured["timeout"] = kwargs.get("timeout")
+        return original_post(self, *args, **kwargs)
+
+    monkeypatch.setattr(scraper.requests.Session, "post", spy_post)
+    responses.add(
+        responses.POST,
+        scraper.API_URL,
+        body=success_body({"searchListingsByQuery": {"listings": {"totalCount": 0, "edges": []}}}),
+        status=200,
+    )
+    client = scraper.TuttiClient(delay=0, timeout=7.5)
+
+    client.search("velo")
+
+    assert captured["timeout"] == 7.5
+
+
 @responses.activate
 def test_fresh_hash_header_sent_per_request(no_sleep):
     responses.add(responses.POST, scraper.API_URL, body=errors_body(), status=200)

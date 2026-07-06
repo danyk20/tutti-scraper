@@ -9,6 +9,7 @@ the [License](README.md#license) section of the README).
 git clone https://github.com/danyk20/tutti-scraper.git
 cd tutti-scraper
 pipenv install --dev
+pipenv run pre-commit install  # one-time: runs ruff + mypy on every commit
 ```
 
 ## Before opening a PR
@@ -78,7 +79,6 @@ the only manual step:
    reaches real PyPI, since the version/tag check and the real-PyPI job
    both key off an exact `vX.Y.Z` tag.
 
-One-time setup this depends on (not done yet for this repo — see the
-release workflow's own notes): a Trusted Publisher registered on both
-pypi.org and test.pypi.org for this repo, and matching GitHub Environments
-named `pypi`/`testpypi`.
+This depends on a Trusted Publisher registered on both pypi.org and
+test.pypi.org for this repo, and matching GitHub Environments named
+`pypi`/`testpypi` (already set up).

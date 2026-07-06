@@ -90,6 +90,92 @@ def test_main_translates_free_only_flag(fake_scrape, tmp_path, monkeypatch):
     assert fake_scrape["kwargs"]["free_only"] is True
 
 
+def test_main_translates_timeout_and_max_retries_flags(fake_scrape, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    scraper.main(["velo", "--timeout", "10", "--max-retries", "2"])
+
+    assert fake_scrape["kwargs"]["timeout"] == 10.0
+    assert fake_scrape["kwargs"]["max_retries"] == 2
+
+
+def test_main_default_timeout_and_max_retries(fake_scrape, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    scraper.main(["velo"])
+
+    assert fake_scrape["kwargs"]["timeout"] == 30.0
+    assert fake_scrape["kwargs"]["max_retries"] == 5
+
+
+def test_main_dry_run_writes_no_files(fake_scrape, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    scraper.main(["velo", "--dry-run"])
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_main_dry_run_calls_scrape_with_detail_false(fake_scrape, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    scraper.main(["velo", "--dry-run"])
+
+    assert fake_scrape["kwargs"]["detail"] is False
+
+
+def test_main_dry_run_defaults_preview_size_to_5(fake_scrape, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    scraper.main(["velo", "--dry-run"])
+
+    assert fake_scrape["kwargs"]["max_results"] == 5
+
+
+def test_main_dry_run_respects_max_as_preview_size(fake_scrape, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    scraper.main(["velo", "--dry-run", "--max", "2"])
+
+    assert fake_scrape["kwargs"]["max_results"] == 2
+
+
+def test_main_dry_run_logs_preview_rows(fake_scrape, tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
+    scraper.main(["velo", "--dry-run"])
+
+    out = capsys.readouterr().out
+    assert "1 matching listing(s) previewed" in out
+    assert "Velo" in out
+    assert "https://www.tutti.ch/de/vi/x/1" in out
+
+
+def test_main_dry_run_logs_suggested_categories_when_present(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
+    def _fake_scrape(query, **kwargs):
+        return scraper.ScrapeResult(
+            query=query,
+            total_elements=1,
+            listings=[{"listingID": "1"}],
+            rows=[{"listingID": "1", "title": "Velo"}],
+            suggested_categories=[{"categoryID": "bicycles", "label": "Velos"}],
+        )
+
+    monkeypatch.setattr(scraper, "scrape", _fake_scrape)
+
+    scraper.main(["velo", "--dry-run"])
+
+    assert "Suggested categories: bicycles" in capsys.readouterr().out
+
+
+def test_main_dry_run_returns_0(fake_scrape, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    assert scraper.main(["velo", "--dry-run"]) == 0
+
+
 def test_main_propagates_scrape_validation_errors(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 

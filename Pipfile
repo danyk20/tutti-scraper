@@ -15,6 +15,7 @@ mypy = "~=2.1"
 types-requests = "~=2.33"
 build = "~=1.5"
 twine = "~=6.2"
+pre-commit = "~=4.0"
 
 [requires]
 python_version = "3.12"

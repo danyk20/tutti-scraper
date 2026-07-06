@@ -142,19 +142,38 @@ def test_scrape_reuses_provided_client(patched_pipeline):
     assert patched_pipeline["search_listings"]["client"] is sentinel_client
 
 
-def test_scrape_constructs_client_from_lang_and_delay_when_none_given(monkeypatch, patched_pipeline):
+def test_scrape_constructs_client_from_lang_delay_timeout_and_max_retries_when_none_given(
+    monkeypatch, patched_pipeline
+):
     created = {}
 
     class SpyClient:
-        def __init__(self, lang="de", delay=1.0):
+        def __init__(self, lang="de", delay=1.0, timeout=30.0, max_retries=5):
             created["lang"] = lang
             created["delay"] = delay
+            created["timeout"] = timeout
+            created["max_retries"] = max_retries
 
     monkeypatch.setattr(scraper, "TuttiClient", SpyClient)
 
-    scraper.scrape("velo", lang="it", delay=2.5, verbose=False)
+    scraper.scrape("velo", lang="it", delay=2.5, timeout=10.0, max_retries=2, verbose=False)
 
-    assert created == {"lang": "it", "delay": 2.5}
+    assert created == {"lang": "it", "delay": 2.5, "timeout": 10.0, "max_retries": 2}
+
+
+def test_scrape_uses_default_timeout_and_max_retries_when_not_given(monkeypatch, patched_pipeline):
+    created = {}
+
+    class SpyClient:
+        def __init__(self, lang="de", delay=1.0, timeout=30.0, max_retries=5):
+            created["timeout"] = timeout
+            created["max_retries"] = max_retries
+
+    monkeypatch.setattr(scraper, "TuttiClient", SpyClient)
+
+    scraper.scrape("velo", verbose=False)
+
+    assert created == {"timeout": 30.0, "max_retries": 5}
 
 
 def test_scrape_passes_all_new_filters_through_to_search_listings(patched_pipeline):

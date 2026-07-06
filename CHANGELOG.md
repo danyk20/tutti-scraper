@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `timeout`/`max_retries` are now configurable on `scrape()` and the CLI
+  (`--timeout`, `--max-retries`) instead of only via a custom `TuttiClient`.
+- `--dry-run` CLI flag: previews up to `--max` (default 5) matching
+  listings — no detail fetch, no files written. Useful for sanity-checking
+  a query before committing to a full run.
+- `py.typed` marker so downstream `mypy`/`pyright` type-check against this
+  package's real signatures instead of treating it as untyped.
+- `__all__` export list documenting the public API surface.
+- Pre-commit hooks (ruff + mypy) — `pipenv run pre-commit install` to catch
+  issues before they're committed, not just in CI.
+- Dependabot config for both the `pip` (Pipfile) and `github-actions`
+  ecosystems, weekly.
+- CodeQL security scanning workflow, on push/PR and weekly.
+- A feature-request issue template, alongside the existing bug report one.
+
 ## [0.2.0] - 2026-07-05
 
 ### Added

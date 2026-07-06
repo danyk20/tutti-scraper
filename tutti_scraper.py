@@ -179,6 +179,25 @@ PRIORITY_FIELDS = [
     "url",
 ]
 
+__all__ = [
+    "scrape",
+    "ScrapeResult",
+    "TuttiClient",
+    "TuttiError",
+    "Scraper",
+    "search_listings",
+    "visit_all_listings",
+    "listing_url",
+    "price_constraint",
+    "flatten_listing",
+    "order_fieldnames",
+    "save_csv",
+    "save_json",
+    "build_arg_parser",
+    "main",
+    "run_cli",
+]
+
 # Library code only ever logs through this logger - it never calls
 # basicConfig or attaches handlers of its own (that would be rude to a host
 # application). The CLI (see _configure_cli_logging(), used by main()) is the
@@ -200,10 +219,11 @@ class TuttiClient:
     header set (see module docstring) and a fresh X-Tutti-Hash per request,
     so it's a small class rather than a bare session."""
 
-    def __init__(self, lang="de", delay=1.0, max_retries=5):
+    def __init__(self, lang="de", delay=1.0, max_retries=5, timeout=30.0):
         self.lang = lang
         self.delay = delay
         self.max_retries = max_retries
+        self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -222,7 +242,7 @@ class TuttiClient:
         for attempt in range(1, self.max_retries + 1):
             self.session.headers["X-Tutti-Hash"] = str(uuid.uuid4())
             try:
-                resp = self.session.post(API_URL, json=body, timeout=30)
+                resp = self.session.post(API_URL, json=body, timeout=self.timeout)
             except requests.RequestException as exc:
                 last_exc = exc
                 logger.warning("POST %s failed (%s); retry %d/%d", API_URL, exc, attempt, self.max_retries)
@@ -669,6 +689,8 @@ def scrape(
     delay: float = 1.0,
     verbose: bool = True,
     client: "TuttiClient | None" = None,
+    timeout: float = 30.0,
+    max_retries: int = 5,
     category: str | None = None,
     price_from: int | None = None,
     price_to: int | None = None,
@@ -700,9 +722,12 @@ def scrape(
         verbose: If True, emit progress via the "tutti_scraper" logger at
             INFO level.
         client: Optional TuttiClient to reuse (e.g. across repeated calls).
-            A new one is created (using `lang` and `delay`) if not given -
-            if you do pass one, make sure its `lang` matches this `lang`
-            argument, since they aren't cross-checked.
+            A new one is created (using `lang`, `delay`, `timeout`, and
+            `max_retries`) if not given - if you do pass one, make sure its
+            settings match these arguments, since they aren't cross-checked.
+        timeout: Seconds to wait for a single HTTP response before retrying.
+        max_retries: Maximum attempts per request before giving up with a
+            TuttiError.
         category: Pin the search to this tutti.ch categoryID (e.g.
             "bicycles"), skipping auto category-split. Use
             `ScrapeResult.suggested_categories` from an unfiltered search
@@ -743,7 +768,7 @@ def scrape(
     if postcode is not None and not postcode.isdigit():
         raise ValueError(f"postcode must be numeric, got {postcode!r}")
 
-    client = client or TuttiClient(lang=lang, delay=delay)
+    client = client or TuttiClient(lang=lang, delay=delay, timeout=timeout, max_retries=max_retries)
 
     if verbose:
         logger.info("Searching tutti.ch for %r ...", query)
@@ -815,6 +840,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--max", type=int, default=None, help="Stop after N listings.")
     parser.add_argument("--delay", type=float, default=1.0, help="Delay in seconds between requests.")
+    parser.add_argument(
+        "--timeout", type=float, default=30.0, help="Seconds to wait for a single HTTP response before retrying."
+    )
+    parser.add_argument("--max-retries", type=int, default=5, help="Maximum attempts per request before giving up.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview up to --max (default 5) matching listings without visiting detail pages or writing any files.",
+    )
     parser.add_argument("--price-from", type=int, default=None, help="Minimum price in CHF (inclusive).")
     parser.add_argument("--price-to", type=int, default=None, help="Maximum price in CHF (inclusive).")
     parser.add_argument(
@@ -875,14 +909,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     _configure_cli_logging(verbose=args.verbose, quiet=args.quiet)
 
-    result = scrape(
-        args.query,
+    filter_kwargs = dict(
         lang=args.lang,
-        detail=not args.no_detail,
         sort=args.sort,
-        max_results=args.max,
         delay=args.delay,
-        verbose=True,
+        timeout=args.timeout,
+        max_retries=args.max_retries,
         category=args.category,
         price_from=args.price_from,
         price_to=args.price_to,
@@ -892,6 +924,18 @@ def main(argv: list[str] | None = None) -> int:
         max_age_days=args.max_age_days,
         highlighted_only=args.highlighted_only,
     )
+
+    if args.dry_run:
+        preview_size = args.max or 5
+        result = scrape(args.query, detail=False, max_results=preview_size, verbose=True, **filter_kwargs)
+        logger.info("Dry run: %d matching listing(s) previewed (no files written, no detail fetch).", len(result.rows))
+        for row in result.rows:
+            logger.info("  %s  %s  %s", row.get("formattedPrice") or "-", row.get("title") or "", row.get("url") or "")
+        if result.suggested_categories:
+            logger.info("Suggested categories: %s", ", ".join(c["categoryID"] for c in result.suggested_categories))
+        return 0
+
+    result = scrape(args.query, detail=not args.no_detail, max_results=args.max, verbose=True, **filter_kwargs)
 
     out_base = args.out or _slugify(args.query)
     csv_path = f"{out_base}.csv"

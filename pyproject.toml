@@ -49,7 +49,7 @@ dev = [
 path = "tutti_scraper.py"
 
 [tool.hatch.build.targets.wheel]
-include = ["tutti_scraper.py"]
+include = ["tutti_scraper.py", "py.typed"]
 
 [tool.pytest.ini_options]
 markers = [
