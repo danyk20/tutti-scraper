@@ -250,6 +250,31 @@ def test_scrape_raises_on_non_numeric_postcode(patched_pipeline, postcode):
     assert patched_pipeline == {}
 
 
+@pytest.mark.parametrize("category", ["vehicles", "animals", "sportsOutdoors"])
+def test_scrape_raises_on_category_group(patched_pipeline, category):
+    with pytest.raises(ValueError, match=f"category '{category}' is a category group"):
+        scraper.scrape("velo", verbose=False, category=category)
+
+    assert patched_pipeline == {}
+
+
+def test_scrape_category_group_error_lists_sub_categories(patched_pipeline):
+    with pytest.raises(ValueError, match="cars, carAccessories, boats"):
+        scraper.scrape("velo", verbose=False, category="vehicles")
+
+
+def test_scrape_accepts_sub_category(patched_pipeline):
+    scraper.scrape("velo", verbose=False, category="bicycles")
+
+    assert patched_pipeline["search_listings"]["category"] == "bicycles"
+
+
+def test_category_groups_never_list_a_group_as_a_sub_category():
+    sub_categories = {c for subs in scraper.CATEGORY_GROUPS.values() for c in subs}
+
+    assert sub_categories.isdisjoint(scraper.CATEGORY_GROUPS)
+
+
 def test_scrape_accepts_numeric_postcode(patched_pipeline):
     scraper.scrape("velo", verbose=False, postcode="3000")
 

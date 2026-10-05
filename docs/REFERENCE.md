@@ -59,9 +59,9 @@ tutti.ch's API can apply them itself:
   to tutti.ch as part of the search itself, reusing the same `category`/
   `constraints` machinery the pagination workaround above needs anyway.
   Pinning `category` also skips the auto category-split step, since
-  there's nothing left to discover. Use `ScrapeResult.suggested_categories`
-  from an unfiltered search to find valid `category` values for your
-  query.
+  there's nothing left to discover. See [Categories](#categories) for
+  every valid `category` ID, or use `ScrapeResult.suggested_categories`
+  from an unfiltered search to see the ones relevant to your query.
 - **Client-side** (`canton`, `postcode`, `max_age_days`, `highlighted_only`)
   — applied locally against already-fetched summary fields, since tutti.ch
   has no server-side constraint for them. `max_results` still counts
@@ -76,6 +76,147 @@ location search (would need reverse-engineering tutti.ch's place-name-to-
 locality-ID resolution) and per-category structured attribute filters like
 color/size/brand (each category has its own dynamic filter schema that
 would need to be queried and mapped).
+
+## Categories
+
+Every value `category=` / `--category` accepts. This is tutti.ch's full
+category tree as of 2026-10-05, taken from the `categoriesRoot` data its own
+homepage embeds (`https://www.tutti.ch/de`, `/fr`, `/it`). Each ID was then
+checked against the live search API.
+
+**Only the 90 IDs in the first table work as a filter.** tutti.ch's tree has
+17 *group* IDs (second table, e.g. `vehicles`, `animals`) that each hold
+several sub-categories. The search API doesn't filter on a group ID and
+gives no error: results come back from unrelated categories. That's why
+`scrape()` and the CLI reject a group ID with `ValueError` before any
+network call, and the error message lists the group's sub-categories. The
+same mapping is importable as `tutti_scraper.CATEGORY_GROUPS`. To cover a
+whole group, run one search per sub-category ID. An ID that isn't in the tree at
+all, e.g. a typo, makes the API fail with `Internal Server Error`. After
+retrying, the scraper raises `TuttiError`.
+
+The six IDs marked *(top level)* have no sub-categories, so they are
+filterable themselves. The labels are the ones tutti.ch shows in each
+locale; the ID is the same in every locale. Each listing's `categoryKey`
+CSV column holds one of these IDs too.
+
+### Filterable category IDs
+
+| `categoryID` | Group | German | French | Italian |
+|---|---|---|---|---|
+| `antiquesArts` | *(top level)* | Antiquitäten & Kunst | Art & Antiquités | Arte e antiquariato |
+| `babyCare` | `babyChild` | Babypflege | Soin bébé | Cura neonato |
+| `strollersSeats` | `babyChild` | Kinderwagen & Sitze | Poussettes & Sièges enfant | Passeggini e seggiolini |
+| `childrensRoom` | `babyChild` | Kinderzimmer | Chambre d'enfant | Cameretta |
+| `babyClothes` | `babyChild` | Kleider & Schuhe | Vêtements & Chaussures | Abbigliamento e scarpe |
+| `comics` | `books` | Comics | BD | Fumetti |
+| `novels` | `books` | Romane | Romans | Romanzi |
+| `nonFictionBooks` | `books` | Sachbücher & Ratgeber | Savoirs & Guides | Manuali e guide |
+| `otherBooks` | `books` | Sonstige Bücher | Autres livres | Altri libri |
+| `officeMaterialFurniture` | `officeBusiness` | Büromaterial & Büromöbel | Matériel & mobilier de bureau | Materiale e mobili per uffici |
+| `commercialInstallationsFurniture` | `officeBusiness` | Geschäftseinrichtungen | Aménagement commercial | Mobili e utensili per esercizi |
+| `computers` | `computersAccessories` | Computer | Ordinateurs | Computer |
+| `computerComponentsAccessories` | `computersAccessories` | Komponenten & Zubehör | Composantes & Accessoires | Componenti e accessori |
+| `software` | `computersAccessories` | Software | Logiciel | Software |
+| `tablets` | `computersAccessories` | Tablets | Tablettes | Tablet |
+| `businessOfficeServices` | `services` | Büroservice | Administration | Amministrazione |
+| `cateringHospitalityServices` | `services` | Catering, Gastronomie & Partyplanung | Restauration et gastronomie, partyservice | Ristorazione, gastronomia, organizzazione di eventi |
+| `computerServices` | `services` | Computer & Handys | Informatique & portables | Computer e cellulari |
+| `electronicMechanicalServices` | `services` | Elektronik & Mechanik | Electronique et mécanique | Elettronica e meccanica |
+| `financeLegalServices` | `services` | Finanzen & Recht | Finance et droit | Finanza e diritto |
+| `healthBeautyServices` | `services` | Gesundheit & Schönheit | Santé et beauté | Salute e bellezza |
+| `craftsServices` | `services` | Handwerk | Artisanat | Artigianato |
+| `householdCleaningServices` | `services` | Haushalt & Reinigung | Ménage et nettoyage | Lavori domestici e pulizie |
+| `coursesTuitionServices` | `services` | Kurse & Unterricht | Cours et formations | Corsi e lezioni |
+| `petServices` | `services` | Tiere | Animaux | Animali |
+| `transportationMovingServices` | `services` | Umzug & Transport | Transport et déménagement | Traslochi e trasporti |
+| `propertyMaintenanceServices` | `services` | Unterhalt & Sicherheit | Sécurité et entretien | Manutenzione e sicurezza |
+| `otherServices` | `services` | Sonstige Dienstleistungen | Autres Services | Altri Servizi |
+| `cars` | `vehicles` | Autos | Voitures | Auto |
+| `carAccessories` | `vehicles` | Autozubehör | Accessoires auto | Accessori auto |
+| `boats` | `vehicles` | Boote & Zubehör | Bateaux & Accessoires | Barche e accessori |
+| `motorcycleAccessories` | `vehicles` | Motorradzubehör | Accessoires moto | Accessori moto |
+| `motorcycles` | `vehicles` | Motorräder | Motos | Moto |
+| `utilityVehicles` | `vehicles` | Nutzfahrzeuge | Véhicules utilitaires | Veicoli commerciali |
+| `caravans` | `vehicles` | Wohnmobile | Camping-cars & Caravanes | Camper e roulotte |
+| `films` | *(top level)* | Filme | Films | Film |
+| `photoCameras` | `photoVideo` | Fotokameras | Appareils photo | Macchine fotografiche |
+| `videoCameras` | `photoVideo` | Videokameras | Caméscopes | Videocamere |
+| `photoVideoAccessories` | `photoVideo` | Zubehör | Accessoires | Accessori |
+| `buildingMaterials` | `gardenCraft` | Baumaterial | Matériel de construction | Materiale da costruzione |
+| `gardenOutfitting` | `gardenCraft` | Gartenausstattung | Equipement de jardin | Per il giardino |
+| `gardenEquipment` | `gardenCraft` | Werkzeuge & Maschinen | Outils & Machines | Attrezzi e macchine |
+| `lighting` | `household` | Beleuchtung | Luminaires | Illuminazione |
+| `decorationAccessories` | `household` | Deko & Accessoires | Déco & Accessoires | Decorazione e accessori |
+| `equipmentTools` | `household` | Geräte & Utensilien | Electroménager & Ustensiles | Elettrodomestici e utensili |
+| `food` | `household` | Lebensmittel | Alimentation | Alimentari |
+| `furniture` | `household` | Möbel | Mobilier | Mobili |
+| `realEstate` | *(top level)* | Immobilien | Immobilier | Immobili |
+| `accessories` | `clothesAccessories` | Accessoires & Beauty | Accessoires & Beauté | Accessori e Beauty |
+| `womensClothes` | `clothesAccessories` | Kleidung für Damen | Habits pour femmes | Abiti da donna |
+| `mensClothes` | `clothesAccessories` | Kleidung für Herren | Habits pour hommes | Abiti da uomo |
+| `womensShoes` | `clothesAccessories` | Schuhe für Damen | Chaussures pour femmes | Scarpe da donna |
+| `mensShoes` | `clothesAccessories` | Schuhe für Herren | Chaussures pour hommes | Scarpe da uomo |
+| `bagsWallets` | `clothesAccessories` | Taschen & Portemonnaies | Sacs & Porte-monnaies | Borse e portafogli |
+| `watchesJewelry` | `clothesAccessories` | Uhren & Schmuck | Montres & Bijoux | Orologi e gioielli |
+| `cds` | `music` | CD, Vinyl & Kassetten | CD, Vinyles & Cassettes | CD, vinili e cassette |
+| `musicalInstruments` | `music` | Instrumente | Instruments de musique | Strumenti |
+| `collectibles` | *(top level)* | Sammeln | Objets de collection | Collezionismo |
+| `handicrafts` | `toysHandicrafts` | Basteln | Bricolage | Bricolage |
+| `modeling` | `toysHandicrafts` | Modellbau | Modélisme | Modellismo |
+| `consolesGames` | `toysHandicrafts` | Spielkonsolen & Games | Consoles & Jeux vidéo | Console e videogiochi |
+| `toys` | `toysHandicrafts` | Spielzeuge | Jouets | Giocattoli |
+| `camping` | `sportsOutdoors` | Camping | Camping | Campeggio |
+| `fitness` | `sportsOutdoors` | Fitness | Fitness | Fitness |
+| `bicycles` | `sportsOutdoors` | Velos | Vélos | Biciclette |
+| `winterSports` | `sportsOutdoors` | Wintersport | Sports d'hiver | Sport invernali |
+| `otherSports` | `sportsOutdoors` | Sonstige Sportarten | Autres sports | Altri sport |
+| `gastronomy` | `jobs` | Gastgewerbe | Hôtellerie | Ristorazione e alberghi |
+| `healthcare` | `jobs` | Gesundheitswesen | Santé | Settore sanitario |
+| `craftConstruction` | `jobs` | Handwerk & Bau | Artisanat & Construction | Artigianato ed edilizia |
+| `childcareCleaning` | `jobs` | Kinderbetreuung & Reinigung | Garde d'enfants & Nettoyage | Baby-sitting e pulizie |
+| `otherJobs` | `jobs` | Sonstige Stellen | Autres emplois | Altri lavori |
+| `audioHifi` | `tvAudio` | Audio & Hi-Fi | Audio & Hi-Fi | Audio e Hi-Fi |
+| `dvdPlayers` | `tvAudio` | DVD-Player | Lecteurs DVD | Lettori DVD |
+| `tv` | `tvAudio` | Fernseher | TV | Televisori |
+| `landlinePhones` | `phonesNavigation` | Festnetztelefone | Téléphones fixes | Telefoni fissi |
+| `cellPhones` | `phonesNavigation` | Handys | Téléphones mobiles | Cellulari |
+| `navigationSystems` | `phonesNavigation` | Navigationssysteme | GPS | Navigatori |
+| `phoneNavigationAccessories` | `phonesNavigation` | Zubehör | Accessoires | Accessori |
+| `ticketsVouchers` | *(top level)* | Tickets & Gutscheine | Billetterie & Bons | Biglietti e buoni |
+| `fish` | `animals` | Fische | Poissons | Pesci |
+| `rabbitsRodents` | `animals` | Hasen & Nagetiere | Lapins & Rongeurs | Conigli e roditori |
+| `dogs` | `animals` | Hunde | Chiens | Cani |
+| `dogAccessories` | `animals` | Hunde Zubehör | Accessoires chiens | Accessori per cani |
+| `cats` | `animals` | Katzen | Chats | Gatti |
+| `horses` | `animals` | Pferde | Chevaux | Cavalli |
+| `reptiles` | `animals` | Reptilien | Reptiles | Rettili |
+| `birds` | `animals` | Vögel | Oiseaux | Uccelli |
+| `otherAnimals` | `animals` | Sonstige Tiere | Autres animaux | Altri animali |
+| `other` | *(top level)* | Sonstiges | Autres | Altro |
+
+### Group IDs — not usable as a filter
+
+| Group ID (not a valid filter) | German | French | Italian | Use instead |
+|---|---|---|---|---|
+| `babyChild` | Baby & Kind | Bébé & Enfant | Neonati e bambini | `babyCare`, `strollersSeats`, `childrensRoom`, `babyClothes` |
+| `books` | Bücher | Livres | Libri | `comics`, `novels`, `nonFictionBooks`, `otherBooks` |
+| `officeBusiness` | Büro & Gewerbe | Bureau & Commerce | Uffici ed esercizi | `officeMaterialFurniture`, `commercialInstallationsFurniture` |
+| `computersAccessories` | Computer & Zubehör | Informatique | Computer e accessori | `computers`, `computerComponentsAccessories`, `software`, `tablets` |
+| `services` | Dienstleistungen | Services | Servizi | `businessOfficeServices`, `cateringHospitalityServices`, `computerServices`, `electronicMechanicalServices`, `financeLegalServices`, `healthBeautyServices`, `craftsServices`, `householdCleaningServices`, `coursesTuitionServices`, `petServices`, `transportationMovingServices`, `propertyMaintenanceServices`, `otherServices` |
+| `vehicles` | Fahrzeuge | Véhicules | Veicoli | `cars`, `carAccessories`, `boats`, `motorcycleAccessories`, `motorcycles`, `utilityVehicles`, `caravans` |
+| `photoVideo` | Foto & Video | Photo & Vidéo | Foto e video | `photoCameras`, `videoCameras`, `photoVideoAccessories` |
+| `gardenCraft` | Garten & Handwerk | Jardin & Outils | Giardino e fai da te | `buildingMaterials`, `gardenOutfitting`, `gardenEquipment` |
+| `household` | Haushalt | Maison | Per la casa | `lighting`, `decorationAccessories`, `equipmentTools`, `food`, `furniture` |
+| `clothesAccessories` | Kleidung & Accessoires | Vêtements & Accessoires | Abbigliamento e accessori | `accessories`, `womensClothes`, `mensClothes`, `womensShoes`, `mensShoes`, `bagsWallets`, `watchesJewelry` |
+| `music` | Musik | Musique | Musica | `cds`, `musicalInstruments` |
+| `toysHandicrafts` | Spielzeuge & Basteln | Jouets & Bricolage | Giocattoli e bricolage | `handicrafts`, `modeling`, `consolesGames`, `toys` |
+| `sportsOutdoors` | Sport & Outdoor | Sport & Outdoor | Sport e outdoor | `camping`, `fitness`, `bicycles`, `winterSports`, `otherSports` |
+| `jobs` | Stellenangebote | Postes vacants | Offerte di lavoro | `gastronomy`, `healthcare`, `craftConstruction`, `childcareCleaning`, `otherJobs` |
+| `tvAudio` | TV & Audio | TV & Audio | TV e audio | `audioHifi`, `dvdPlayers`, `tv` |
+| `phonesNavigation` | Telefon & Navigation | Téléphonie & Navigation | Telefonia e navigazione | `landlinePhones`, `cellPhones`, `navigationSystems`, `phoneNavigationAccessories` |
+| `animals` | Tiere | Animaux | Animali | `fish`, `rabbitsRodents`, `dogs`, `dogAccessories`, `cats`, `horses`, `reptiles`, `birds`, `otherAnimals` |
+
 
 ## Locales
 
@@ -99,7 +240,7 @@ def scrape(
     client: TuttiClient | None = None,  # reuse a client across calls if given
     timeout: float = 30.0,           # seconds per HTTP response before retrying
     max_retries: int = 5,            # max attempts per request before giving up
-    category: str | None = None,     # pin to this categoryID, server-side (skips auto category-split)
+    category: str | None = None,     # pin to this categoryID, server-side (skips auto category-split; group IDs raise ValueError, see Categories)
     price_from: int | None = None,   # CHF, inclusive, server-side
     price_to: int | None = None,     # CHF, inclusive, server-side
     free_only: bool = False,         # only free listings, server-side (see Filters)
@@ -113,7 +254,8 @@ def scrape(
 
 Raises `ValueError` immediately (before any network call) if `price_from >
 price_to`, if `free_only` is combined with `price_from`/`price_to`, if
-`max_age_days` isn't positive, or if `postcode` isn't numeric. Raises
+`max_age_days` isn't positive, if `postcode` isn't numeric, or if
+`category` is a category group ID (see [Categories](#categories)). Raises
 `TuttiError` on unrecoverable GraphQL/HTTP errors from tutti.ch after
 retries are exhausted, and `requests.RequestException` subclasses on
 unrecoverable network errors.

@@ -77,7 +77,7 @@ from typing import Any
 
 import requests
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 API_URL = "https://www.tutti.ch/api/v10/graphql"
 
@@ -165,6 +165,70 @@ MAX_TOTAL = MAX_OFFSET + PAGE_SIZE  # items reachable in one linear pass
 MAX_PRICE = 100_000_000  # CHF ceiling for price bisection (covers real estate)
 MAX_BISECT_DEPTH = 40
 
+# tutti.ch's category groups, mapped to the sub-category IDs they contain
+# (snapshot of 2026-10-05, see docs/REFERENCE.md#categories). The search API
+# doesn't filter on a group ID - it returns listings from unrelated
+# categories without any error - so scrape() rejects them up front.
+CATEGORY_GROUPS = {
+    "babyChild": ("babyCare", "strollersSeats", "childrensRoom", "babyClothes"),
+    "books": ("comics", "novels", "nonFictionBooks", "otherBooks"),
+    "officeBusiness": ("officeMaterialFurniture", "commercialInstallationsFurniture"),
+    "computersAccessories": ("computers", "computerComponentsAccessories", "software", "tablets"),
+    "services": (
+        "businessOfficeServices",
+        "cateringHospitalityServices",
+        "computerServices",
+        "electronicMechanicalServices",
+        "financeLegalServices",
+        "healthBeautyServices",
+        "craftsServices",
+        "householdCleaningServices",
+        "coursesTuitionServices",
+        "petServices",
+        "transportationMovingServices",
+        "propertyMaintenanceServices",
+        "otherServices",
+    ),
+    "vehicles": (
+        "cars",
+        "carAccessories",
+        "boats",
+        "motorcycleAccessories",
+        "motorcycles",
+        "utilityVehicles",
+        "caravans",
+    ),
+    "photoVideo": ("photoCameras", "videoCameras", "photoVideoAccessories"),
+    "gardenCraft": ("buildingMaterials", "gardenOutfitting", "gardenEquipment"),
+    "household": ("lighting", "decorationAccessories", "equipmentTools", "food", "furniture"),
+    "clothesAccessories": (
+        "accessories",
+        "womensClothes",
+        "mensClothes",
+        "womensShoes",
+        "mensShoes",
+        "bagsWallets",
+        "watchesJewelry",
+    ),
+    "music": ("cds", "musicalInstruments"),
+    "toysHandicrafts": ("handicrafts", "modeling", "consolesGames", "toys"),
+    "sportsOutdoors": ("camping", "fitness", "bicycles", "winterSports", "otherSports"),
+    "jobs": ("gastronomy", "healthcare", "craftConstruction", "childcareCleaning", "otherJobs"),
+    "tvAudio": ("audioHifi", "dvdPlayers", "tv"),
+    "phonesNavigation": ("landlinePhones", "cellPhones", "navigationSystems", "phoneNavigationAccessories"),
+    "animals": (
+        "fish",
+        "rabbitsRodents",
+        "dogs",
+        "dogAccessories",
+        "cats",
+        "horses",
+        "reptiles",
+        "birds",
+        "otherAnimals",
+    ),
+}
+
 PRIORITY_FIELDS = [
     "listingID",
     "title",
@@ -181,6 +245,7 @@ PRIORITY_FIELDS = [
 
 __all__ = [
     "scrape",
+    "CATEGORY_GROUPS",
     "ScrapeResult",
     "TuttiClient",
     "TuttiError",
@@ -731,7 +796,9 @@ def scrape(
         category: Pin the search to this tutti.ch categoryID (e.g.
             "bicycles"), skipping auto category-split. Use
             `ScrapeResult.suggested_categories` from an unfiltered search
-            to discover valid values for a given query.
+            to discover valid values for a given query. A category group
+            ID (a key of CATEGORY_GROUPS, e.g. "vehicles") raises
+            ValueError, since tutti.ch can't filter on it.
         price_from: Minimum price in CHF (inclusive). Sent to tutti.ch as a
             server-side filter.
         price_to: Maximum price in CHF (inclusive). Sent to tutti.ch as a
@@ -756,8 +823,9 @@ def scrape(
 
     Raises:
         ValueError: if price_from > price_to, if free_only is combined with
-            price_from/price_to, if max_age_days isn't positive, or if
-            postcode isn't numeric. Raised before any network call.
+            price_from/price_to, if max_age_days isn't positive, if
+            postcode isn't numeric, or if category is a category group.
+            Raised before any network call.
     """
     if price_from is not None and price_to is not None and price_from > price_to:
         raise ValueError(f"price_from ({price_from}) must be <= price_to ({price_to})")
@@ -767,6 +835,11 @@ def scrape(
         raise ValueError(f"max_age_days must be positive, got {max_age_days}")
     if postcode is not None and not postcode.isdigit():
         raise ValueError(f"postcode must be numeric, got {postcode!r}")
+    if category in CATEGORY_GROUPS:
+        raise ValueError(
+            f"category {category!r} is a category group, which tutti.ch can't filter on - "
+            f"use one of its sub-categories instead: {', '.join(CATEGORY_GROUPS[category])}"
+        )
 
     client = client or TuttiClient(lang=lang, delay=delay, timeout=timeout, max_retries=max_retries)
 
@@ -859,7 +932,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--category",
         default=None,
-        help="Pin the search to a tutti.ch categoryID (e.g. 'bicycles'), skipping auto category-split.",
+        help="Pin the search to a tutti.ch categoryID (e.g. 'bicycles'), skipping auto category-split. "
+        "Category group IDs (e.g. 'vehicles') are rejected - tutti.ch can't filter on them.",
     )
     parser.add_argument("--canton", default=None, help="Only listings in this canton (2-letter code, e.g. 'BE').")
     parser.add_argument("--postcode", default=None, help="Only listings whose postcode starts with this value.")

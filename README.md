@@ -51,7 +51,7 @@ Prints progress, then writes `velo.csv` and `velo.json` in the current directory
 | `--timeout` | Seconds to wait for a single HTTP response before retrying (default `30.0`) |
 | `--max-retries` | Maximum attempts per request before giving up (default `5`) |
 | `--dry-run` | Preview up to `--max` (default `5`) matching listings — no detail fetch, no files written |
-| `--category` | Pin the search to a tutti.ch categoryID (e.g. `bicycles`), skipping auto category-split |
+| `--category` | Pin the search to a tutti.ch categoryID (e.g. `bicycles`), skipping auto category-split — [all valid IDs](docs/REFERENCE.md#categories) |
 | `--price-from` / `--price-to` | Filter by price in CHF, server-side (inclusive, either end optional) |
 | `--free-only` | Only free listings — cannot be combined with `--price-from`/`--price-to` |
 | `--canton` | Only listings in this canton (2-letter code, e.g. `BE`), client-side |
