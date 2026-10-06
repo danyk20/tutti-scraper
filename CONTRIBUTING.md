@@ -74,7 +74,13 @@ the only manual step:
 4. The release workflow verifies `__version__` matches the tag (fails fast
    if they disagree), builds, publishes to TestPyPI, then to real PyPI.
    Watch the Actions tab.
-5. To dry-run the pipeline without a real release, push a pre-release tag
+5. If TestPyPI is down (the `publish-testpypi` job fails with a 503), run
+   the workflow manually against the same tag and skip the rehearsal:
+   ```bash
+   gh workflow run release.yml --ref vX.Y.Z -f skip_testpypi=true
+   ```
+   The tag must point at a commit whose `release.yml` has this input.
+6. To dry-run the pipeline without a real release, push a pre-release tag
    instead (e.g. `vX.Y.Z-rc1`) — it publishes to TestPyPI only and never
    reaches real PyPI, since the version/tag check and the real-PyPI job
    both key off an exact `vX.Y.Z` tag.

@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A `skip_testpypi` option for manually running the release workflow, for
+  when TestPyPI is down - it no longer blocks a PyPI release.
 - `tests/test_docs.py`: fails if the README (the PyPI page) has a relative
   link, or if any Markdown link into this repo points to a missing file or
   heading.
