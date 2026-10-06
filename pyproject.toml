@@ -65,6 +65,9 @@ source = ["tutti_scraper"]
 [tool.ruff]
 target-version = "py312"
 line-length = 120
+# Ruff 0.16+ also formats code blocks in Markdown; the docs keep hand-aligned
+# comments there, so leave .md files alone.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = [
