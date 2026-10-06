@@ -29,6 +29,7 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/danyk20/tutti-scraper"
 Repository = "https://github.com/danyk20/tutti-scraper"
+Documentation = "https://github.com/danyk20/tutti-scraper/blob/master/docs/REFERENCE.md"
 Issues = "https://github.com/danyk20/tutti-scraper/issues"
 Changelog = "https://github.com/danyk20/tutti-scraper/blob/master/CHANGELOG.md"
 

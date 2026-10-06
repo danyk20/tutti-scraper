@@ -42,8 +42,8 @@ pipenv run pytest -m e2e --no-cov
   current API shape, and it was reverse-engineered from tutti.ch's own
   compiled JS bundles rather than any published schema.
 - Keep the change minimal and focused; this is a small single-file utility
-  by design (see the README's [Notes](README.md#notes) section for what's
-  intentionally out of scope, e.g. concurrency, Docker, a database layer).
+  by design, so concurrency, Docker, or a database layer are intentionally
+  out of scope.
 - This project aims to stay interchangeable in shape with its sibling
   [`autoscout24-scraper`](https://github.com/danyk20/autoscout24-scraper)
   (same `scrape()`/`ScrapeResult`/CLI pattern, different data source) —

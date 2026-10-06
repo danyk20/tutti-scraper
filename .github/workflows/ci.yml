@@ -20,11 +20,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      # Install the exact versions pinned in Pipfile.lock - the same ones
+      # `pipenv install --dev` gives you locally - so CI and the dev
+      # environment can't disagree (e.g. on how ruff formats code).
+      - name: Install locked dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install "requests~=2.34" "pytest~=9.1" "pytest-cov~=7.1" "responses~=0.26" \
-                      "ruff~=0.15" "mypy~=2.1" "types-requests~=2.33"
+          python -m pip install --upgrade pip pipenv
+          pipenv requirements --dev > "$RUNNER_TEMP/requirements.txt"
+          pip install -r "$RUNNER_TEMP/requirements.txt"
 
       - name: Ruff lint
         run: ruff check .
