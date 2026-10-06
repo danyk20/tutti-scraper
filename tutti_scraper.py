@@ -77,7 +77,7 @@ from typing import Any
 
 import requests
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 
 API_URL = "https://www.tutti.ch/api/v10/graphql"
 
