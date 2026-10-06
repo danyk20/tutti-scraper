@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-10-06
+
+### Fixed
+
+- Links from the README to `docs/REFERENCE.md`, `CONTRIBUTING.md`, and
+  `LICENSE` were relative, so they 404'd on the PyPI project page (PyPI
+  only receives the README). They are now absolute GitHub URLs, and the
+  PyPI sidebar gets a "Documentation" link.
+- `CONTRIBUTING.md` linked to a README section that no longer exists.
+- CI now installs the exact versions from `Pipfile.lock` instead of its own
+  loose version ranges, so it can no longer run a newer ruff than the dev
+  environment.
+
+### Added
+
+- `tests/test_docs.py`: fails if the README (the PyPI page) has a relative
+  link, or if any Markdown link into this repo points to a missing file or
+  heading.
+
 ## [0.3.1] - 2026-10-05
 
 ### Fixed
